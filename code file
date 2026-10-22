@@ -1,0 +1,133 @@
+
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+
+# 1. Create a hypothetical agricultural dataset
+np.random.seed(42)
+n = 500
+
+df = pd.DataFrame({
+    "crop": np.random.choice(["Wheat", "Rice", "Maize"], n),
+    "season": np.random.choice(["Kharif", "Rabi", "Zaid"], n),
+    "rainfall_mm": np.random.uniform(200, 1200, n),
+    "temperature_c": np.random.uniform(15, 40, n),
+    "soil_ph": np.random.uniform(4.5, 8.5, n),
+    "fertilizer_kg_ha": np.random.uniform(10, 200, n),
+    "irrigation_mm": np.random.uniform(0, 300, n),
+    "cultivated_area_ha": np.random.uniform(0.5, 10, n)
+})
+
+# Simulated target for demonstration only
+df["yield_tonnes_per_ha"] = (
+    2.0
+    + 0.003 * df["rainfall_mm"]
+    - 0.025 * abs(df["temperature_c"] - 27)
+    + 0.015 * df["fertilizer_kg_ha"]
+    + 0.004 * df["irrigation_mm"]
+    - 0.15 * abs(df["soil_ph"] - 6.5)
+    + np.random.normal(0, 0.5, n)
+).clip(lower=0.1)
+
+# 2. Introduce missing values to demonstrate cleaning
+df.loc[df.sample(frac=0.03, random_state=1).index,
+       "rainfall_mm"] = np.nan
+
+# 3. Data cleaning: remove duplicate records
+df = df.drop_duplicates().copy()
+
+# 4. Feature engineering
+
+# Log transformation for skewed non-negative values
+df["log_rainfall"] = np.log1p(df["rainfall_mm"].clip(lower=0))
+df["log_fertilizer"] = np.log1p(
+    df["fertilizer_kg_ha"].clip(lower=0)
+)
+
+# Temperature stress indicator
+df["heat_stress"] = (
+    df["temperature_c"] > 35
+).astype(int)
+
+# Soil pH suitability distance from an illustrative optimum
+df["soil_ph_deviation"] = abs(df["soil_ph"] - 6.5)
+
+# Interaction between rainfall and irrigation
+df["water_availability"] = (
+    df["rainfall_mm"] + df["irrigation_mm"]
+)
+
+# Fertilizer intensity per cultivated area
+df["fertilizer_per_ha"] = (
+    df["fertilizer_kg_ha"] / df["cultivated_area_ha"]
+)
+
+# Interaction between heat stress and irrigation
+df["heat_irrigation_interaction"] = (
+    df["heat_stress"] * df["irrigation_mm"]
+)
+
+# 5. Separate features and target
+X = df.drop(columns=["yield_tonnes_per_ha"])
+y = df["yield_tonnes_per_ha"]
+
+numeric_features = X.select_dtypes(
+    include=["number"]
+).columns.tolist()
+
+categorical_features = X.select_dtypes(
+    include=["object"]
+).columns.tolist()
+
+# 6. Split before fitting preprocessing to avoid data leakage
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+# 7. Preprocessing pipelines
+numeric_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler())
+])
+
+categorical_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("encoder", OneHotEncoder(handle_unknown="ignore"))
+])
+
+preprocessor = ColumnTransformer([
+    ("numeric", numeric_pipeline, numeric_features),
+    ("categorical", categorical_pipeline, categorical_features)
+])
+
+# Fit only on training data
+X_train_transformed = preprocessor.fit_transform(X_train)
+X_test_transformed = preprocessor.transform(X_test)
+
+# 8. Display results
+print("Original dataset shape:", df.shape)
+print("Training data shape:", X_train.shape)
+print("Testing data shape:", X_test.shape)
+
+print("\nEngineered features:")
+print([
+    "log_rainfall",
+    "log_fertilizer",
+    "heat_stress",
+    "soil_ph_deviation",
+    "water_availability",
+    "fertilizer_per_ha",
+    "heat_irrigation_interaction"
+])
+
+print("\nTransformed training data shape:",
+      X_train_transformed.shape)
+print("Transformed testing data shape:",
+      X_test_transformed.shape)
+
+print("\nSample of engineered data:")
+print(df.head())
